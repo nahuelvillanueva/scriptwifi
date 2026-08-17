@@ -60,5 +60,16 @@ TARGET_SSID=${red_ssids[$((red_idx-1))]}
 echo -e "\n=== 3. Conexión ==="
 echo "Conectando a '$TARGET_SSID' a través de $IFACE..."
 
-# El comando ahora recibe el nombre de red 100% pulido sin espacios fantasmas
-iwctl station "$IFACE" connect "$TARGET_SSID"
+# Comprobar si la red ya está guardada en iwd (los perfiles se guardan en /var/lib/iwd/)
+# Si ya existe el perfil, no hace falta pedir clave.
+if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
+    echo "Red conocida detectada. Conectando automáticamente..."
+    iwctl station "$IFACE" connect "$TARGET_SSID"
+else
+    # Si es una red nueva, te pedimos la clave nosotros de forma segura
+    read -s -p "Ingresá la contraseña para '$TARGET_SSID': " user_pass
+    echo "" # Nueva línea para prolijidad
+    
+    # Se la pasamos de forma directa usando el parámetro oficial de la terminal
+    iwctl --passphrase "$user_pass" station "$IFACE" connect "$TARGET_SSID"
+fi
