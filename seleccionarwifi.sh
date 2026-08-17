@@ -1,96 +1,116 @@
 #!/bin/bash
 
-# 1. Detectar placas Wi-Fi a través de iwd
-echo "=== 1. Placas Wi-Fi detectadas (iwd) ==="
-interfaces=($(iwctl device list | awk 'NR>4 {print $2}' | grep -v '^$'))
-
-if [ ${#interfaces[@]} -eq 0 ]; then
-    echo "No se encontraron placas Wi-Fi activas en iwd."
-    exit 1
-fi
-
-# Mostrar las placas numeradas
-for i in "${!interfaces[@]}"; do
-    echo "[$((i+1))] ${interfaces[$i]}"
-done
-
-# Elegir la placa
-read -p "Seleccioná el número de interfaz que querés usar: " iface_idx
-if [[ ! "$iface_idx" =~ ^[0-9]+$ ]] || [ "$iface_idx" -le 0 ] || [ "$iface_idx" -gt ${#interfaces[@]} ]; then
-    echo "Selección inválida."
-    exit 1
-fi
-IFACE=${interfaces[$((iface_idx-1))]}
-
-# 2. Escanear y listar redes disponibles en esa placa
-echo -e "\n=== 2. Buscando redes con $IFACE... ==="
-iwctl station "$IFACE" scan
-echo "Escaneando el entorno, por favor esperá..."
-sleep 4
-
-# Obtener la lista limpia de códigos ANSI de color
-raw_networks=$(iwctl station "$IFACE" get-networks | sed 's/\x1B\[[0-9;]*[JKmsu]//g')
-
-# Guardar los nombres de las redes en un arreglo limpios de espacios al inicio/final
-IFS=$'\n' red_ssids=($(echo "$raw_networks" | awk 'NR>4 {print substr($0, 5, 32)}' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$'))
-
-if [ ${#red_ssids[@]} -eq 0 ]; then
-    echo "No se encontraron redes Wi-Fi al alcance de esta placa."
-    exit 1
-fi
-
-# Mostrar la lista de redes numeradas para el usuario
-echo "Redes encontradas:"
-echo "--------------------------------------------------------"
-for idx in "${!red_ssids[@]}"; do
-    echo "[$((idx+1))] ${red_ssids[$idx]}"
-done
-echo "--------------------------------------------------------"
-
-# Elegir el número de la red
-read -p "Seleccioná el número de la red (1, 2, 3...): " red_idx
-if [[ ! "$red_idx" =~ ^[0-9]+$ ]] || [ "$red_idx" -le 0 ] || [ "$red_idx" -gt ${#red_ssids[@]} ]; then
-    echo "Selección de red inválida."
-    exit 1
-fi
-
-TARGET_SSID=${red_ssids[$((red_idx-1))]}
-
-# 3. Conexión interactiva con control de errores corregido
-echo -e "\n=== 3. Conexión ==="
-
 while true; do
-    # Comprobar si la red ya está guardada en iwd (evita pedir contraseña si ya existe el perfil)
-    if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
-        echo "Red conocida detectada. Conectando automáticamente a '$TARGET_SSID'..."
-        iwctl station "$IFACE" connect "$TARGET_SSID"
-        
-        if [ $? -eq 0 ]; then
-            echo "¡Conexión establecida con éxito!"
-            break
-        fi
+    # 1. Detectar placas Wi-Fi a través de iwd
+    clear
+    echo "=== 1. Placas Wi-Fi detectadas (iwd) ==="
+    interfaces=($(iwctl device list | awk 'NR>4 {print $2}' | grep -v '^$'))
+
+    if [ ${#interfaces[@]} -eq 0 ]; then
+        echo "No se encontraron placas Wi-Fi activas en iwd."
+        exit 1
     fi
 
-    # Si es nueva o falló el intento automático, pedimos la contraseña de forma segura
-    read -s -p "Ingresá la contraseña para '$TARGET_SSID': " user_pass
-    echo "" # Salto de línea
+    # Mostrar las placas numeradas
+    for i in "${!interfaces[@]}"; do
+        echo "[$((i+1))] ${interfaces[$i]}"
+    done
 
-    # SINTAXIS CORREGIDA: Se pasa la contraseña limpia mediante el parámetro oficial '--passphrase'
-    # y el SSID va entre comillas simples/dobles estándar de Bash, sin escapar barras invertidas.
-    iwctl --passphrase "$user_pass" station "$IFACE" connect "$TARGET_SSID"
-    
-    # Verificar si la conexión fue exitosa
-    if [ $? -eq 0 ]; then
-        echo -e "\n¡Conexión establecida con éxito con '$TARGET_SSID'!"
-        break
-    else
-        echo -e "\n[!] Error: Contraseña incorrecta o fallo en los parámetros."
-        read -p "¿Querés volver a intentar? (Presioná Enter para reintentar o 's' para salir): " opcion
-        
-        if [ "$opcion" = "s" ] || [ "$opcion" = "S" ]; then
-            echo "Conexión cancelada por el usuario."
-            exit 0
+    # Elegir la placa
+    read -p "Seleccioná el número de interfaz que querés usar: " iface_idx
+    if [[ ! "$iface_idx" =~ ^[0-9]+$ ]] || [ "$iface_idx" -le 0 ] || [ "$iface_idx" -gt ${#interfaces[@]} ]; then
+        echo "Selección inválida. Presioná Enter para reiniciar..."
+        read
+        continue
+    fi
+    IFACE=${interfaces[$((iface_idx-1))]}
+
+    # 2. Escanear y listar redes disponibles en esa placa
+    echo -e "\n=== 2. Buscando redes con $IFACE... ==="
+    iwctl station "$IFACE" scan
+    echo "Escaneando el entorno, por favor esperá..."
+    sleep 4
+
+    # Obtener la lista limpia de códigos ANSI de color
+    raw_networks=$(iwctl station "$IFACE" get-networks | sed 's/\x1B\[[0-9;]*[JKmsu]//g')
+
+    # Guardar los nombres de las redes en un arreglo limpios de espacios al inicio/final
+    IFS=$'\n' red_ssids=($(echo "$raw_networks" | awk 'NR>4 {print substr($0, 5, 32)}' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$'))
+
+    if [ ${#red_ssids[@]} -eq 0 ]; then
+        echo "No se encontraron redes Wi-Fi al alcance de esta placa."
+        read -p "Presioná Enter para volver a escanear o 's' para salir: " op_vacia
+        if [ "$op_vacia" = "s" ] || [ "$op_vacia" = "S" ]; then exit 0; else continue; fi
+    fi
+
+    # Mostrar la lista de redes numeradas para el usuario
+    echo "Redes encontradas:"
+    echo "--------------------------------------------------------"
+    for idx in "${!red_ssids[@]}"; do
+        echo "[$((idx+1))] ${red_ssids[$idx]}"
+    done
+    echo "--------------------------------------------------------"
+
+    # Elegir el número de la red
+    read -p "Seleccioná el número de la red (1, 2, 3...): " red_idx
+    if [[ ! "$red_idx" =~ ^[0-9]+$ ]] || [ "$red_idx" -le 0 ] || [ "$red_idx" -gt ${#red_ssids[@]} ]; then
+        echo "Selección de red inválida. Presioná Enter para volver al inicio..."
+        read
+        continue
+    fi
+
+    TARGET_SSID=${red_ssids[$((red_idx-1))]}
+    VOLVER_A_EMPEZAR=false
+
+    # 3. Bucle de conexión interactiva
+    echo -e "\n=== 3. Conexión ==="
+    while true; do
+        # Comprobar si la red ya está guardada en iwd (los perfiles se guardan en /var/lib/iwd/)
+        if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
+            echo "Red conocida detectada. Conectando automáticamente a '$TARGET_SSID'..."
+            # Enviamos el error a /dev/null para limpiar la terminal de mensajes toscos
+            iwctl station "$IFACE" connect "$TARGET_SSID" 2>/dev/null
+            
+            if [ $? -eq 0 ]; then
+                echo "¡Conexión establecida con éxito!"
+                exit 0
+            fi
         fi
-        echo "Reintentando conexión..."
+
+        # Si es nueva o el intento automático falló, pedimos contraseña
+        read -s -p "Ingresá la contraseña para '$TARGET_SSID': " user_pass
+        echo "" # Salto de línea obligado por ocultar la entrada
+
+        # CLAVE DEL CAMBIO: Redirigimos el error estándar (2) a la nada misma (/dev/null)
+        iwctl --passphrase "$user_pass" station "$IFACE" connect "$TARGET_SSID" 2>/dev/null
+        
+        # Evaluar el código de salida
+        if [ $? -eq 0 ]; then
+            echo -e "\n¡Conexión establecida con éxito con '$TARGET_SSID'!"
+            exit 0
+        else
+            echo -e "\n[!] Error: Contraseña incorrecta."
+            echo "--------------------------------------------------------"
+            echo "Opciones:"
+            echo "  [Enter] Volver a intentar la contraseña"
+            echo "  [d]     Volver a seleccionar una placa o red"
+            echo "  [s]     Salir del script"
+            echo "--------------------------------------------------------"
+            read -p "Elegí una opción: " opcion
+            
+            if [ "$opcion" = "s" ] || [ "$opcion" = "S" ]; then
+                echo "Conexión cancelada por el usuario."
+                exit 0
+            elif [ "$opcion" = "d" ] || [ "$opcion" = "D" ]; then
+                VOLVER_A_EMPEZAR=true
+                break # Rompe este bucle interno de contraseña e irá al inicio
+            fi
+            echo "Reintentando contraseña..."
+        fi
+    done
+
+    # Si el usuario apretó 'd', el bucle externo principal vuelve a arrancar
+    if [ "$VOLVER_A_EMPEZAR" = true ]; then
+        continue
     fi
 done
