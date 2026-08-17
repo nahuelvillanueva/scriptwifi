@@ -39,7 +39,7 @@ if [ ${#red_ssids[@]} -eq 0 ]; then
     exit 1
 fi
 
-# Mostrar la lista de redes numeradas para el usuario (reutilizando el arreglo limpio para evitar confusiones visuales)
+# Mostrar la lista de redes numeradas para el usuario
 echo "Redes encontradas:"
 echo "--------------------------------------------------------"
 for idx in "${!red_ssids[@]}"; do
@@ -56,20 +56,35 @@ fi
 
 TARGET_SSID=${red_ssids[$((red_idx-1))]}
 
-# 3. Conexión interactiva con control de errores
+# 3. Conexión interactiva con control de errores corregido
 echo -e "\n=== 3. Conexión ==="
-echo "Conectando a '$TARGET_SSID' a través de $IFACE..."
 
 while true; do
-    # Ejecutamos el comando. Si la clave es errónea, iwctl fallará internamente
-    iwctl station "$IFACE" connect "\"$TARGET_SSID\""
+    # Comprobar si la red ya está guardada en iwd (evita pedir contraseña si ya existe el perfil)
+    if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
+        echo "Red conocida detectada. Conectando automáticamente a '$TARGET_SSID'..."
+        iwctl station "$IFACE" connect "$TARGET_SSID"
+        
+        if [ $? -eq 0 ]; then
+            echo "¡Conexión establecida con éxito!"
+            break
+        fi
+    fi
+
+    # Si es nueva o falló el intento automático, pedimos la contraseña de forma segura
+    read -s -p "Ingresá la contraseña para '$TARGET_SSID': " user_pass
+    echo "" # Salto de línea
+
+    # SINTAXIS CORREGIDA: Se pasa la contraseña limpia mediante el parámetro oficial '--passphrase'
+    # y el SSID va entre comillas simples/dobles estándar de Bash, sin escapar barras invertidas.
+    iwctl --passphrase "$user_pass" station "$IFACE" connect "$TARGET_SSID"
     
-    # Verificar si la conexión fue exitosa (código de salida 0)
+    # Verificar si la conexión fue exitosa
     if [ $? -eq 0 ]; then
         echo -e "\n¡Conexión establecida con éxito con '$TARGET_SSID'!"
         break
     else
-        echo -e "\n[!] Error: Contraseña incorrecta o fallo en la autenticación."
+        echo -e "\n[!] Error: Contraseña incorrecta o fallo en los parámetros."
         read -p "¿Querés volver a intentar? (Presioná Enter para reintentar o 's' para salir): " opcion
         
         if [ "$opcion" = "s" ] || [ "$opcion" = "S" ]; then
