@@ -1,8 +1,15 @@
 #!/bin/bash
 
+# Función para limpiar variables al volver a empezar
+reiniciar_variables() {
+    unset interfaces iface_idx IFACE raw_networks red_ssids red_idx TARGET_SSID
+}
+
 while true; do
-    # 1. Detectar placas Wi-Fi a través de iwd
+    reiniciar_variables
     clear
+    
+    # 1. Detectar placas Wi-Fi a través de iwd
     echo "=== 1. Placas Wi-Fi detectadas (iwd) ==="
     interfaces=($(iwctl device list | awk 'NR>4 {print $2}' | grep -v '^$'))
 
@@ -60,31 +67,31 @@ while true; do
     fi
 
     TARGET_SSID=${red_ssids[$((red_idx-1))]}
-    VOLVER_A_EMPEZAR=false
 
     # 3. Bucle de conexión interactiva
     echo -e "\n=== 3. Conexión ==="
-    while true; do
-        # Comprobar si la red ya está guardada en iwd (los perfiles se guardan en /var/lib/iwd/)
-        if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
-            echo "Red conocida detectada. Conectando automáticamente a '$TARGET_SSID'..."
-            # Enviamos el error a /dev/null para limpiar la terminal de mensajes toscos
-            iwctl station "$IFACE" connect "$TARGET_SSID" 2>/dev/null
-            
-            if [ $? -eq 0 ]; then
-                echo "¡Conexión establecida con éxito!"
-                exit 0
-            fi
+    
+    # Comprobar si la red ya está guardada en iwd de antemano
+    if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
+        echo "Red conocida detectada. Conectando automáticamente a '$TARGET_SSID'..."
+        iwctl station "$IFACE" connect "$TARGET_SSID" >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo "¡Conexión establecida con éxito!"
+            exit 0
         fi
+    fi
 
-        # Si es nueva o el intento automático falló, pedimos contraseña
+    # Bucle exclusivo para la contraseña o cambio de opción
+    while true; do
         read -s -p "Ingresá la contraseña para '$TARGET_SSID': " user_pass
         echo "" # Salto de línea obligado por ocultar la entrada
 
-        # CLAVE DEL CAMBIO: Redirigimos el error estándar (2) a la nada misma (/dev/null)
-        iwctl --passphrase "$user_pass" station "$IFACE" connect "$TARGET_SSID" 2>/dev/null
+        # SOLUCIÓN AL "ARGUMENT FORMAT IS INVALID":
+        # Usamos envíos crudos usando 'xargs' para asegurar que las comillas y los espacios de la variable
+        # se traduzcan de manera exacta como strings hacia el binario de iwd, redirigiendo salidas toscas a la nada.
+        echo "station $IFACE connect \"$TARGET_SSID\"" | xargs iwctl --passphrase "$user_pass" >/dev/null 2>&1
         
-        # Evaluar el código de salida
+        # Evaluar el código de salida real del intento
         if [ $? -eq 0 ]; then
             echo -e "\n¡Conexión establecida con éxito con '$TARGET_SSID'!"
             exit 0
@@ -102,15 +109,10 @@ while true; do
                 echo "Conexión cancelada por el usuario."
                 exit 0
             elif [ "$opcion" = "d" ] || [ "$opcion" = "D" ]; then
-                VOLVER_A_EMPEZAR=true
-                break # Rompe este bucle interno de contraseña e irá al inicio
+                # Rompe el bucle de contraseña y vuelve al menú principal
+                break 2
             fi
             echo "Reintentando contraseña..."
         fi
     done
-
-    # Si el usuario apretó 'd', el bucle externo principal vuelve a arrancar
-    if [ "$VOLVER_A_EMPEZAR" = true ]; then
-        continue
-    fi
 done
