@@ -56,20 +56,26 @@ fi
 
 TARGET_SSID=${red_ssids[$((red_idx-1))]}
 
-# 3. Conexión interactiva
+# 3. Conexión interactiva con control de errores
 echo -e "\n=== 3. Conexión ==="
 echo "Conectando a '$TARGET_SSID' a través de $IFACE..."
 
-# Comprobar si la red ya está guardada en iwd (los perfiles se guardan en /var/lib/iwd/)
-# Si ya existe el perfil, no hace falta pedir clave.
-if [ -f "/var/lib/iwd/$TARGET_SSID.psk" ] || [ -f "/var/lib/iwd/$TARGET_SSID.8021x" ]; then
-    echo "Red conocida detectada. Conectando automáticamente..."
-    iwctl station "$IFACE" connect "$TARGET_SSID"
-else
-    # Si es una red nueva, te pedimos la clave nosotros de forma segura
-    read -s -p "Ingresá la contraseña para '$TARGET_SSID': " user_pass
-    echo "" # Nueva línea para prolijidad
+while true; do
+    # Ejecutamos el comando. Si la clave es errónea, iwctl fallará internamente
+    iwctl station "$IFACE" connect "\"$TARGET_SSID\""
     
-    # Se la pasamos de forma directa usando el parámetro oficial de la terminal
-    iwctl --passphrase "$user_pass" station "$IFACE" connect "$TARGET_SSID"
-fi
+    # Verificar si la conexión fue exitosa (código de salida 0)
+    if [ $? -eq 0 ]; then
+        echo -e "\n¡Conexión establecida con éxito con '$TARGET_SSID'!"
+        break
+    else
+        echo -e "\n[!] Error: Contraseña incorrecta o fallo en la autenticación."
+        read -p "¿Querés volver a intentar? (Presioná Enter para reintentar o 's' para salir): " opcion
+        
+        if [ "$opcion" = "s" ] || [ "$opcion" = "S" ]; then
+            echo "Conexión cancelada por el usuario."
+            exit 0
+        fi
+        echo "Reintentando conexión..."
+    fi
+done
