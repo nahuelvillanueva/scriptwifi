@@ -2,7 +2,6 @@
 
 # 1. Detectar placas Wi-Fi a través de iwd
 echo "=== 1. Placas Wi-Fi detectadas (iwd) ==="
-# Extrae solo los nombres de los dispositivos de la lista de iwd
 interfaces=($(iwctl device list | awk 'NR>4 {print $2}' | grep -v '^$'))
 
 if [ ${#interfaces[@]} -eq 0 ]; then
@@ -26,24 +25,26 @@ IFACE=${interfaces[$((iface_idx-1))]}
 # 2. Escanear y listar redes disponibles en esa placa
 echo -e "\n=== 2. Buscando redes con $IFACE... ==="
 iwctl station "$IFACE" scan
-sleep 2
+echo "Escaneando el entorno, por favor esperá..."
+sleep 4
 
-# Obtener la lista limpia de SSIDs (nombres de red)
-# El comando de iwd devuelve códigos de color ANSI, con 'sed' los limpiamos para que el script no falle
+# Obtener la lista limpia de códigos ANSI de color
 raw_networks=$(iwctl station "$IFACE" get-networks | sed 's/\x1B\[[0-9;]*[JKmsu]//g')
 
-# Guardar los nombres de las redes en un arreglo (saltando las cabeceras de iwctl)
-IFS=$'\n' red_ssids=($(echo "$raw_networks" | awk 'NR>4 {print substr($0, 5, 32)}' | sed 's/[[:space:]]*$//' | grep -v '^$'))
+# Guardar los nombres de las redes en un arreglo limpios de espacios al inicio/final
+IFS=$'\n' red_ssids=($(echo "$raw_networks" | awk 'NR>4 {print substr($0, 5, 32)}' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$'))
 
 if [ ${#red_ssids[@]} -eq 0 ]; then
     echo "No se encontraron redes Wi-Fi al alcance de esta placa."
     exit 1
 fi
 
-# Mostrar la lista de redes numeradas para el usuario
+# Mostrar la lista de redes numeradas para el usuario (reutilizando el arreglo limpio para evitar confusiones visuales)
 echo "Redes encontradas:"
 echo "--------------------------------------------------------"
-echo "$raw_networks" | awk 'NR>4 {print "["NR-4"] " $0}'
+for idx in "${!red_ssids[@]}"; do
+    echo "[$((idx+1))] ${red_ssids[$idx]}"
+done
 echo "--------------------------------------------------------"
 
 # Elegir el número de la red
@@ -59,6 +60,5 @@ TARGET_SSID=${red_ssids[$((red_idx-1))]}
 echo -e "\n=== 3. Conexión ==="
 echo "Conectando a '$TARGET_SSID' a través de $IFACE..."
 
-# iwctl es inteligente: si la red ya está guardada, se conecta directo.
-# Si no está guardada y requiere clave, el propio iwctl te va a pedir el Password en la terminal de forma segura.
+# El comando ahora recibe el nombre de red 100% pulido sin espacios fantasmas
 iwctl station "$IFACE" connect "$TARGET_SSID"
