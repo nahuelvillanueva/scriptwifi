@@ -20,10 +20,13 @@ NC='\033[0m'
 # ----------------------------------------------------------
 
 get_interfaces() {
-    "$IWCTL" device list 2>/dev/null |
-        awk '/^[[:space:]]*[a-zA-Z0-9._-]+[[:space:]]+.*wifi/ {
-            print $1
-        }'
+    for dev in /sys/class/net/*; do
+        dev="${dev##*/}"
+
+        if [ -d "/sys/class/net/$dev/wireless" ]; then
+            echo "$dev"
+        fi
+    done
 }
 
 # ----------------------------------------------------------
@@ -172,7 +175,7 @@ ask_password() {
     while true; do
 
         echo
-        read -rsp "Contraseña para '$SSID' (c=cancelar, d=otra red): " PASSWORD
+        read -rp "Contraseña para '$SSID' (c=cancelar, d=otra red): " PASSWORD
         echo
 
         case "$PASSWORD" in
