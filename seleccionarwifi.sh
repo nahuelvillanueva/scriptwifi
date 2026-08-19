@@ -45,13 +45,13 @@ fi
 # ----------------------------------------------------------
 
 get_interfaces() {
-    "$IWCTL" station list 2>/dev/null |
-        awk '
-        NR > 2 && $1 != "" && $1 !~ /^-+$/ {
-            print $1
-        }
-        ' |
-        grep -E '^(wlan|wlp|wlx|tplink|wifi)'
+    for dev in /sys/class/net/*; do
+        dev="${dev##*/}"
+
+        if [ -d "/sys/class/net/$dev/wireless" ]; then
+            echo "$dev"
+        fi
+    done
 }
 
 
