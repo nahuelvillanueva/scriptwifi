@@ -269,6 +269,10 @@ signal_label() {
 # ESCANEAR REDES
 # ----------------------------------------------------------
 
+# ----------------------------------------------------------
+# ESCANEAR REDES
+# ----------------------------------------------------------
+
 scan_networks() {
 
     echo
@@ -283,45 +287,26 @@ scan_networks() {
 
     sleep 2
 
-    # Cada entrada de NETWORKS queda como:
-    #   nombre<0x1f>seguridad<0x1f>señal
-    # (0x1f = separador de unidad, no aparece en nombres de red reales)
+    # IMPORTANTE:
+    # Conservamos los códigos ANSI que iwctl utiliza para
+    # representar la intensidad de la señal.
 
     mapfile -t NETWORKS < <(
 
         "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
-        # 1) Quitar códigos de color ANSI (esto causaba el texto
-        #    gris "pegado" al resto de la línea).
-        sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' |
-        tr -d '\r' |
-        # 2) Quedarnos SOLO con líneas que tengan una columna de
-        #    seguridad real (psk/open/wep/8021x/owe/sae/wpa), y de
-        #    ahí extraer nombre, seguridad y señal. Así ignoramos
-        #    automáticamente título, guiones y encabezado.
         awk '
-        {
-            line = $0
-
-            sub(/^[>*[:space:]]+/, "", line)
-
-            if (match(line, /[[:space:]](psk|open|wep|8021x|owe|sae|wpa)([[:space:]]|$)/)) {
-
-                sectok = substr(line, RSTART, RLENGTH)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", sectok)
-
-                name = substr(line, 1, RSTART - 1)
-                gsub(/[[:space:]]+$/, "", name)
-
-                rest = substr(line, RSTART + RLENGTH)
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", rest)
-
-                if (name != "") {
-                    printf "%s\x1f%s\x1f%s\n", name, sectok, rest
-                }
-            }
+        /^[[:space:]]*Network[[:space:]]+Name/ {
+            next
         }
-        ' |
-        sort -u -t $'\x1f' -k1,1
+
+        /^[[:space:]]*-+[[:space:]]*$/ {
+            next
+        }
+
+        NF >= 3 {
+            print
+        }
+        '
 
     )
 
@@ -345,22 +330,15 @@ select_network() {
 
     echo
     echo -e "${CYAN}==========================================${NC}"
-    echo -e "${CYAN}            REDES WIFI${NC}"
+    echo -e "${CYAN}              REDES WIFI${NC}"
     echo -e "${CYAN}==========================================${NC}"
     echo
 
     local i=1
-    local name sec signal
 
     for network in "${NETWORKS[@]}"; do
 
-        IFS=$'\x1f' read -r name sec signal <<< "$network"
-
-        printf "  %2d) %-28s %-16s Señal: %b\n" \
-            "$i" \
-            "$name" \
-            "[$(security_label "$sec")]" \
-            "$(signal_label "$signal")"
+        printf "  %2d) %b\n" "$i" "$network"
 
         ((i++))
 
@@ -394,7 +372,13 @@ select_network() {
                 if [ "$choice" -ge 1 ] &&
                    [ "$choice" -le "${#NETWORKS[@]}" ]; then
 
-                    IFS=$'\x1f' read -r SSID sec signal <<< "${NETWORKS[$((choice-1))]}"
+                    # Guardamos la línea completa seleccionada.
+                    SELECTED_NETWORK="${NETWORKS[$((choice-1))]}"
+
+                    # El SSID es la parte anterior a la columna
+                    # de seguridad.
+                    SSID=$(echo "$SELECTED_NETWORK" |
+                        sed -E 's/[[:space:]]+(psk|open|wep|8021x|owe|sae|wpa)[[:space:]].*$//')
 
                     return 0
                 fi
@@ -407,6 +391,7 @@ select_network() {
 
     done
 }
+
 
 # ----------------------------------------------------------
 # PEDIR CONTRASEÑA
