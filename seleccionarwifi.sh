@@ -21,22 +21,32 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # ----------------------------------------------------------
-# COMPROBAR IWD
+# COMPROBAR IWD / IWCTL
 # ----------------------------------------------------------
 
 if ! command -v iwctl >/dev/null 2>&1; then
-    echo -e "${RED}Error: no se encontró iwctl.${NC}"
+
+    echo -e "${RED}No se encontró iwctl.${NC}"
     echo
-    echo "Instalá iwd con:"
+    echo "El paquete iwd no está instalado."
+    echo
+    echo "Para instalarlo:"
+    echo
     echo "sudo apt install iwd"
+    echo
+
     exit 1
 fi
 
 if ! systemctl is-active --quiet iwd; then
+
     echo -e "${RED}El servicio iwd no está funcionando.${NC}"
     echo
     echo "Podés iniciarlo con:"
+    echo
     echo "sudo systemctl start iwd"
+    echo
+
     exit 1
 fi
 
@@ -45,15 +55,17 @@ fi
 # ----------------------------------------------------------
 
 get_interfaces() {
+
     for dev in /sys/class/net/*; do
+
         dev="${dev##*/}"
 
         if [ -d "/sys/class/net/$dev/wireless" ]; then
             echo "$dev"
         fi
+
     done
 }
-
 
 # ----------------------------------------------------------
 # SELECCIONAR DISPOSITIVO
@@ -68,25 +80,24 @@ select_device() {
         echo
         echo -e "${RED}No se encontraron dispositivos Wi-Fi.${NC}"
         echo
-        echo "Comprobá con:"
-        echo
-        echo "iwctl device list"
-        echo
 
         exit 1
     fi
 
     echo
     echo -e "${CYAN}==========================================${NC}"
-    echo -e "${CYAN}       DISPOSITIVOS WIFI${NC}"
+    echo -e "${CYAN}          DISPOSITIVOS WIFI${NC}"
     echo -e "${CYAN}==========================================${NC}"
     echo
 
     local i=1
 
     for dev in "${DEVICES[@]}"; do
+
         echo "  $i) $dev"
+
         ((i++))
+
     done
 
     echo
@@ -100,7 +111,6 @@ select_device() {
         case "$choice" in
 
             c|C)
-                echo "Cancelado."
                 exit 0
                 ;;
 
@@ -114,11 +124,12 @@ select_device() {
                    [ "$choice" -le "${#DEVICES[@]}" ]; then
 
                     DEVICE="${DEVICES[$((choice-1))]}"
-                    return 0
 
+                    return 0
                 fi
 
                 echo -e "${RED}Opción inválida.${NC}"
+
                 ;;
 
         esac
@@ -135,35 +146,37 @@ scan_networks() {
     echo
     echo -e "${YELLOW}Escaneando redes con $DEVICE...${NC}"
 
-    "$IWCTL" station "$DEVICE" scan >/dev/null 2>&1
+    if ! "$IWCTL" station "$DEVICE" scan >/dev/null 2>&1; then
 
-    sleep 3
+        echo -e "${RED}No se pudo iniciar el escaneo.${NC}"
+
+        return 1
+    fi
+
+    sleep 2
 
     mapfile -t NETWORKS < <(
 
         "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
-        sed -n '/^[[:space:]]*Network[[:space:]]/,$p' |
-        tail -n +2 |
-        sed 's/^[* ]*//' |
+        awk '
+        NR > 1 {
+            line=$0
+
+            sub(/^[*[:space:]]+/, "", line)
+
+            if (line != "" &&
+                line !~ /^Network[[:space:]]*$/ &&
+                line !~ /^[-]+$/) {
+
+                print line
+            }
+        }
+        ' |
         sed 's/[[:space:]]\{2,\}.*$//' |
-        sed '/^$/d'
+        sed '/^$/d' |
+        sort -u
 
     )
-
-    # Método alternativo si el formato anterior no encuentra redes
-
-    if [ "${#NETWORKS[@]}" -eq 0 ]; then
-
-        mapfile -t NETWORKS < <(
-
-            "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
-            tail -n +5 |
-            awk '{$1=$1; print}' |
-            sed '/^$/d'
-
-        )
-
-    fi
 
     if [ "${#NETWORKS[@]}" -eq 0 ]; then
 
@@ -185,7 +198,7 @@ select_network() {
 
     echo
     echo -e "${CYAN}==========================================${NC}"
-    echo -e "${CYAN}          REDES DISPONIBLES${NC}"
+    echo -e "${CYAN}            REDES WIFI${NC}"
     echo -e "${CYAN}==========================================${NC}"
     echo
 
@@ -211,7 +224,6 @@ select_network() {
         case "$choice" in
 
             c|C)
-                echo "Cancelado."
                 exit 0
                 ;;
 
@@ -231,10 +243,10 @@ select_network() {
                     SSID="${NETWORKS[$((choice-1))]}"
 
                     return 0
-
                 fi
 
                 echo -e "${RED}Opción inválida.${NC}"
+
                 ;;
 
         esac
@@ -249,14 +261,13 @@ select_network() {
 ask_password() {
 
     echo
-
-    echo -e "${CYAN}Red seleccionada:${NC} $SSID"
-
+    echo -e "${CYAN}Red:${NC} $SSID"
     echo
+
     echo "Escribí la contraseña."
     echo
-    echo "  c = cancelar"
     echo "  d = elegir otra red"
+    echo "  c = cancelar"
     echo
 
     while true; do
@@ -266,25 +277,20 @@ ask_password() {
         case "$PASSWORD" in
 
             c|C)
-
-                echo "Cancelado."
                 exit 0
                 ;;
 
             d|D)
-
                 return 1
                 ;;
 
             "")
-
                 echo
                 echo -e "${RED}La contraseña está vacía.${NC}"
                 echo
                 ;;
 
             *)
-
                 return 0
                 ;;
 
@@ -294,31 +300,26 @@ ask_password() {
 }
 
 # ----------------------------------------------------------
-# ESCAPAR CARACTERES PARA ARCHIVO IWD
-# ----------------------------------------------------------
-
-escape_iwd() {
-
-    printf '%s' "$1" |
-        sed 's/\\/\\\\/g; s/"/\\"/g'
-
-}
-
-# ----------------------------------------------------------
 # CONECTAR
 # ----------------------------------------------------------
 
 connect_wifi() {
 
     echo
-    echo -e "${YELLOW}Conectando a:${NC} $SSID"
-    echo -e "${YELLOW}Dispositivo:${NC} $DEVICE"
+    echo -e "${YELLOW}Conectando...${NC}"
+    echo
+    echo "Dispositivo : $DEVICE"
+    echo "Red         : $SSID"
     echo
 
-    echo -e "${YELLOW}Intentando conexión...${NC}"
+    # IMPORTANTE:
+    # No usamos sudo.
+    # No escribimos en /var/lib/iwd.
+    # La contraseña se entrega directamente a iwctl.
 
     RESULT=$(
-        "$IWCTL" --passphrase "$PASSWORD" \
+        "$IWCTL" \
+            --passphrase "$PASSWORD" \
             station "$DEVICE" connect "$SSID" 2>&1
     )
 
@@ -333,8 +334,8 @@ connect_wifi() {
         echo -e "${GREEN}       CONECTADO CORRECTAMENTE${NC}"
         echo -e "${GREEN}==========================================${NC}"
         echo
-        echo -e "${GREEN}Red:${NC}         $SSID"
-        echo -e "${GREEN}Dispositivo:${NC} $DEVICE"
+        echo "Dispositivo : $DEVICE"
+        echo "Red         : $SSID"
         echo
 
         return 0
@@ -346,12 +347,14 @@ connect_wifi() {
     echo -e "${RED}==========================================${NC}"
     echo
 
-    echo "$RESULT"
+    if [ -n "$RESULT" ]; then
+        echo "$RESULT"
+    fi
+
     echo
 
     return 1
 }
-
 
 # ==========================================================
 # PROGRAMA PRINCIPAL
@@ -363,13 +366,11 @@ while true; do
 
     echo
     echo -e "${BLUE}==========================================${NC}"
-    echo -e "${BLUE}          WIFI / IWD${NC}"
+    echo -e "${BLUE}             WIFI / IWD${NC}"
     echo -e "${BLUE}==========================================${NC}"
     echo
 
-    # ------------------------------------------------------
-    # Elegir adaptador
-    # ------------------------------------------------------
+    # Elegir dispositivo
 
     select_device
 
@@ -378,12 +379,10 @@ while true; do
         clear
 
         echo
-        echo -e "${CYAN}Dispositivo seleccionado: ${GREEN}$DEVICE${NC}"
+        echo -e "${CYAN}Dispositivo:${NC} ${GREEN}$DEVICE${NC}"
         echo
 
-        # --------------------------------------------------
         # Escanear
-        # --------------------------------------------------
 
         if ! scan_networks; then
 
@@ -401,36 +400,26 @@ while true; do
             continue
         fi
 
-        # --------------------------------------------------
-        # Elegir red
-        # --------------------------------------------------
+        # Seleccionar red
 
         if select_network; then
 
             while true; do
 
-                # ------------------------------------------
-                # Pedir contraseña
-                # ------------------------------------------
+                # Contraseña
 
                 if ask_password; then
 
-                    # --------------------------------------
-                    # Intentar conexión
-                    # --------------------------------------
+                    # Conectar
 
                     if connect_wifi; then
-
                         exit 0
-
                     fi
 
-                    # --------------------------------------
-                    # Falló
-                    # --------------------------------------
+                    # Falló la conexión
 
                     echo
-                    echo -e "${RED}La conexión falló.${NC}"
+                    echo "¿Qué querés hacer?"
                     echo
                     echo "  Enter = volver a introducir contraseña"
                     echo "  d     = elegir otra red"
@@ -450,7 +439,7 @@ while true; do
                             ;;
 
                         *)
-                            # Volver a pedir contraseña
+                            # Reintentar contraseña
                             ;;
 
                     esac
@@ -458,6 +447,7 @@ while true; do
                 else
 
                     # d desde contraseña
+
                     break
 
                 fi
