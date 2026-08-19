@@ -138,6 +138,67 @@ select_device() {
 }
 
 # ----------------------------------------------------------
+# TRADUCIR SEGURIDAD Y SEÑAL A ALGO LEGIBLE
+# ----------------------------------------------------------
+
+security_label() {
+
+    case "$1" in
+        psk)    echo "WPA/WPA2" ;;
+        sae)    echo "WPA3" ;;
+        wep)    echo "WEP" ;;
+        open)   echo "Abierta" ;;
+        8021x)  echo "WPA-Enterprise" ;;
+        owe)    echo "OWE (cifrado sin clave)" ;;
+        wpa)    echo "WPA" ;;
+        *)      echo "$1" ;;
+    esac
+}
+
+signal_label() {
+
+    local raw="$1"
+    local trimmed
+    trimmed=$(echo -n "$raw" | tr -d '[:space:]')
+
+    # iwctl suele representar la señal repitiendo el mismo
+    # carácter (por ejemplo "****" o el carácter de barras que
+    # use tu versión). Si es así, contamos cuántos hay.
+    if [[ -n "$trimmed" ]] && [[ "$trimmed" =~ ^(.)\1*$ ]]; then
+
+        local count=${#trimmed}
+
+        case "$count" in
+            4) echo "Excelente ($raw)" ;;
+            3) echo "Buena ($raw)" ;;
+            2) echo "Regular ($raw)" ;;
+            1) echo "Débil ($raw)" ;;
+            *) echo "$raw" ;;
+        esac
+
+        return
+    fi
+
+    # Si viene como dBm (ej: "-45 dBm")
+    if [[ "$raw" =~ ^-?[0-9]+[[:space:]]*dBm$ ]]; then
+
+        local dbm
+        dbm=$(echo "$raw" | grep -oE -- '-?[0-9]+')
+
+        if   [ "$dbm" -ge -50 ]; then echo "Excelente ($raw)"
+        elif [ "$dbm" -ge -60 ]; then echo "Buena ($raw)"
+        elif [ "$dbm" -ge -70 ]; then echo "Regular ($raw)"
+        else echo "Débil ($raw)"
+        fi
+
+        return
+    fi
+
+    # Formato desconocido: mostramos lo que haya, tal cual
+    echo "$raw"
+}
+
+# ----------------------------------------------------------
 # ESCANEAR REDES
 # ----------------------------------------------------------
 
@@ -155,37 +216,45 @@ scan_networks() {
 
     sleep 2
 
+    # Cada entrada de NETWORKS queda como:
+    #   nombre<0x1f>seguridad<0x1f>señal
+    # (0x1f = separador de unidad, no aparece en nombres de red reales)
+
     mapfile -t NETWORKS < <(
 
         "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
-        # 1) Quitar códigos de color ANSI (esto es lo que causaba
-        #    el texto gris "pegado" al resto de la línea).
+        # 1) Quitar códigos de color ANSI (esto causaba el texto
+        #    gris "pegado" al resto de la línea).
         sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' |
-        # 2) Quitar caracteres no imprimibles raros (líneas de
-        #    bordes con caracteres unicode de tabla, etc.)
         tr -d '\r' |
-        # 3) Quedarnos SOLO con líneas que tengan una columna de
-        #    seguridad real (psk/open/wep/8021x/owe/sae/wpa).
-        #    Así ignoramos automáticamente título, separadores
-        #    de guiones y la fila de encabezado "Network name...",
-        #    sin depender de contar líneas fijas.
+        # 2) Quedarnos SOLO con líneas que tengan una columna de
+        #    seguridad real (psk/open/wep/8021x/owe/sae/wpa), y de
+        #    ahí extraer nombre, seguridad y señal. Así ignoramos
+        #    automáticamente título, guiones y encabezado.
         awk '
         {
             line = $0
 
-            # Quita el ">" de la red conectada y espacios/asteriscos iniciales
             sub(/^[>*[:space:]]+/, "", line)
 
-            if (line ~ /[[:space:]](psk|open|wep|8021x|owe|sae|wpa)([[:space:]]|$)/) {
+            if (match(line, /[[:space:]](psk|open|wep|8021x|owe|sae|wpa)([[:space:]]|$)/)) {
 
-                sub(/[[:space:]]+(psk|open|wep|8021x|owe|sae|wpa).*$/, "", line)
-                gsub(/[[:space:]]+$/, "", line)
+                sectok = substr(line, RSTART, RLENGTH)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", sectok)
 
-                if (line != "") print line
+                name = substr(line, 1, RSTART - 1)
+                gsub(/[[:space:]]+$/, "", name)
+
+                rest = substr(line, RSTART + RLENGTH)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", rest)
+
+                if (name != "") {
+                    printf "%s\x1f%s\x1f%s\n", name, sectok, rest
+                }
             }
         }
         ' |
-        sort -u
+        sort -u -t $'\x1f' -k1,1
 
     )
 
@@ -214,10 +283,17 @@ select_network() {
     echo
 
     local i=1
+    local name sec signal
 
     for network in "${NETWORKS[@]}"; do
 
-        echo "  $i) $network"
+        IFS=$'\x1f' read -r name sec signal <<< "$network"
+
+        printf "  %2d) %-28s %-16s Señal: %s\n" \
+            "$i" \
+            "$name" \
+            "[$(security_label "$sec")]" \
+            "$(signal_label "$signal")"
 
         ((i++))
 
@@ -251,7 +327,7 @@ select_network() {
                 if [ "$choice" -ge 1 ] &&
                    [ "$choice" -le "${#NETWORKS[@]}" ]; then
 
-                    SSID="${NETWORKS[$((choice-1))]}"
+                    IFS=$'\x1f' read -r SSID sec signal <<< "${NETWORKS[$((choice-1))]}"
 
                     return 0
                 fi
