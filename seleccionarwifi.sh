@@ -159,20 +159,44 @@ security_label() {
 
 signal_bar() {
 
-    # iwctl reporta la señal como 0 a 4 asteriscos ('*' a '****').
-    # No existe un 5º nivel real: lo que hacemos es escalar esos
-    # 0-4 asteriscos a una barra de 5, pintando de blanco los
-    # "llenos" (según la intensidad) y de gris el resto.
+    # Preferimos el número real en dBm (viene de "rssi-dbms"), que
+    # es preciso. Si no está disponible (iwd viejo sin ese modo),
+    # caemos al conteo de asteriscos como respaldo.
 
     local raw="$1"
-    local count
-    count=$(grep -o '\*' <<< "$raw" | wc -l)
+    local filled=0
+    local label=""
 
-    local filled=$(( (count * 5 + 2) / 4 ))
-    [ "$filled" -gt 5 ] && filled=5
+    if [[ "$raw" =~ (-?[0-9]+) ]]; then
 
-    local bar=""
-    local i
+        local dbm="${BASH_REMATCH[1]}"
+
+        if   [ "$dbm" -ge -50 ]; then filled=5; label="Excelente"
+        elif [ "$dbm" -ge -60 ]; then filled=4; label="Buena"
+        elif [ "$dbm" -ge -67 ]; then filled=3; label="Regular"
+        elif [ "$dbm" -ge -75 ]; then filled=2; label="Débil"
+        else                          filled=1; label="Muy débil"
+        fi
+
+    else
+
+        local count
+        count=$(grep -o '\*' <<< "$raw" | wc -l)
+
+        filled=$(( (count * 5 + 2) / 4 ))
+        [ "$filled" -gt 5 ] && filled=5
+
+        case "$count" in
+            4) label="Excelente" ;;
+            3) label="Buena" ;;
+            2) label="Regular" ;;
+            1) label="Débil" ;;
+            *) label="Muy débil" ;;
+        esac
+
+    fi
+
+    local bar="" i
 
     for ((i = 1; i <= 5; i++)); do
 
@@ -184,17 +208,7 @@ signal_bar() {
 
     done
 
-    local label
-
-    case "$count" in
-        4) label="Excelente" ;;
-        3) label="Buena" ;;
-        2) label="Regular" ;;
-        1) label="Débil" ;;
-        *) label="Muy débil" ;;
-    esac
-
-    echo -e "${bar} ${label}"
+    echo -e "${bar} ${label} (${raw})"
 }
 
 # ----------------------------------------------------------
@@ -219,9 +233,24 @@ scan_networks() {
     #   nombre<0x1f>seguridad<0x1f>señal
     # (0x1f = separador de unidad, no aparece en nombres de red reales)
 
+    # Pedimos la señal en dBm (número real) en vez de la barra de
+    # asteriscos: por defecto iwctl siempre imprime "****" y marca
+    # la intensidad SOLO con color (barras "apagadas" en gris), y
+    # como filtramos los códigos ANSI para arreglar el bug del texto
+    # gris, esa info se perdía y todo quedaba en 4/4. Con
+    # "rssi-dbms" iwctl devuelve el número real, sin depender de color.
+
+    local raw_output
+    raw_output=$("$IWCTL" station "$DEVICE" get-networks rssi-dbms 2>/dev/null)
+
+    # Por si el iwd instalado es viejo y no soporta "rssi-dbms"
+    if [ -z "$raw_output" ]; then
+        raw_output=$("$IWCTL" station "$DEVICE" get-networks 2>/dev/null)
+    fi
+
     mapfile -t NETWORKS < <(
 
-        "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
+        printf '%s\n' "$raw_output" |
         # 1) Quitar códigos de color ANSI (esto causaba el texto
         #    gris "pegado" al resto de la línea).
         sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' |
