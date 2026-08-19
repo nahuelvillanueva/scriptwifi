@@ -159,115 +159,44 @@ signal_label() {
 
     local raw="$1"
     local trimmed
-
     trimmed=$(echo -n "$raw" | tr -d '[:space:]')
 
-    # ------------------------------------------------------
-    # SEÑAL EN ASTERISCOS
-    # ------------------------------------------------------
-
-    if [[ "$trimmed" =~ ^\*+$ ]]; then
+    # iwctl suele representar la señal repitiendo el mismo
+    # carácter (por ejemplo "****" o el carácter de barras que
+    # use tu versión). Si es así, contamos cuántos hay.
+    if [[ -n "$trimmed" ]] && [[ "$trimmed" =~ ^(.)\1*$ ]]; then
 
         local count=${#trimmed}
 
-        # Limitar a 5
-        [ "$count" -gt 5 ] && count=5
-
-        local filled=""
-        local empty=""
-        local i
-
-        # Asteriscos llenos
-        for ((i=0; i<count; i++)); do
-            filled+="*"
-        done
-
-        # Asteriscos vacíos
-        for ((i=count; i<5; i++)); do
-            empty+="*"
-        done
-
-        local quality
-
         case "$count" in
-            5) quality="Excelente" ;;
-            4) quality="Buena" ;;
-            3) quality="Regular" ;;
-            2) quality="Débil" ;;
-            1) quality="Muy débil" ;;
-            *) quality="Sin señal" ;;
+            4) echo "Excelente ($raw)" ;;
+            3) echo "Buena ($raw)" ;;
+            2) echo "Regular ($raw)" ;;
+            1) echo "Débil ($raw)" ;;
+            *) echo "$raw" ;;
         esac
 
-        # Blanco = señal recibida
-        # Gris = señal faltante
-        printf "\033[37m%s\033[90m%s\033[0m %s" \
-            "$filled" \
-            "$empty" \
-            "$quality"
-
-        return 0
+        return
     fi
 
-    # ------------------------------------------------------
-    # SEÑAL EN dBm
-    # ------------------------------------------------------
-
-    if [[ "$raw" =~ -?[0-9]+[[:space:]]*dBm ]]; then
+    # Si viene como dBm (ej: "-45 dBm")
+    if [[ "$raw" =~ ^-?[0-9]+[[:space:]]*dBm$ ]]; then
 
         local dbm
         dbm=$(echo "$raw" | grep -oE -- '-?[0-9]+')
 
-        local count
-
-        if [ "$dbm" -ge -50 ]; then
-            count=5
-        elif [ "$dbm" -ge -60 ]; then
-            count=4
-        elif [ "$dbm" -ge -70 ]; then
-            count=3
-        elif [ "$dbm" -ge -80 ]; then
-            count=2
-        else
-            count=1
+        if   [ "$dbm" -ge -50 ]; then echo "Excelente ($raw)"
+        elif [ "$dbm" -ge -60 ]; then echo "Buena ($raw)"
+        elif [ "$dbm" -ge -70 ]; then echo "Regular ($raw)"
+        else echo "Débil ($raw)"
         fi
 
-        local filled=""
-        local empty=""
-        local i
-
-        for ((i=0; i<count; i++)); do
-            filled+="*"
-        done
-
-        for ((i=count; i<5; i++)); do
-            empty+="*"
-        done
-
-        local quality
-
-        case "$count" in
-            5) quality="Excelente" ;;
-            4) quality="Buena" ;;
-            3) quality="Regular" ;;
-            2) quality="Débil" ;;
-            1) quality="Muy débil" ;;
-        esac
-
-        printf "\033[37m%s\033[90m%s\033[0m %s" \
-            "$filled" \
-            "$empty" \
-            "$quality"
-
-        return 0
+        return
     fi
 
+    # Formato desconocido: mostramos lo que haya, tal cual
     echo "$raw"
 }
-
-
-# ----------------------------------------------------------
-# ESCANEAR REDES
-# ----------------------------------------------------------
 
 # ----------------------------------------------------------
 # ESCANEAR REDES
@@ -287,27 +216,48 @@ scan_networks() {
 
     sleep 2
 
-    # IMPORTANTE:
-    # Conservamos los códigos ANSI que iwctl utiliza para
-    # representar la intensidad de la señal.
+    # Cada entrada de NETWORKS queda como:
+    #   nombre<0x1f>seguridad<0x1f>señal
+    # (0x1f = separador de unidad, no aparece en nombres de red reales)
 
     mapfile -t NETWORKS < <(
 
         "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
+        tr -d '\r' |
         awk '
-        /^[[:space:]]*Network[[:space:]]+Name/ {
-            next
-        }
+        {
+            line = $0
 
-        /^[[:space:]]*-+[[:space:]]*$/ {
-            next
-        }
+            # Quitar solamente * y espacios del comienzo.
+            # NO tocar los códigos ANSI de color.
+            sub(/^[* >]+/, "", line)
 
-        NF >= 3 {
-            print
-        }
-        '
+            # Buscar la columna Security.
+            if (match(line, /[[:space:]](psk|open|wep|8021x|owe|sae|wpa)([[:space:]]|$)/)) {
 
+                sectok = substr(line, RSTART, RLENGTH)
+
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", sectok)
+
+                name = substr(line, 1, RSTART - 1)
+
+                gsub(/[[:space:]]+$/, "", name)
+
+                rest = substr(line, RSTART + RLENGTH)
+
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", rest)
+
+                if (name != "") {
+
+                    printf "%s\x1f%s\x1f%s\n",
+                           name,
+                           sectok,
+                           rest
+                }
+            }
+        }
+        ' |
+        sort -u -t $'\x1f' -k1,1
     )
 
     if [ "${#NETWORKS[@]}" -eq 0 ]; then
@@ -335,10 +285,19 @@ select_network() {
     echo
 
     local i=1
+    local name
+    local sec
+    local signal
 
     for network in "${NETWORKS[@]}"; do
 
-        printf "  %2d) %b\n" "$i" "$network"
+        IFS=$'\x1f' read -r name sec signal <<< "$network"
+
+        printf "  %2d) %-28s %-16s Señal: %b\n" \
+            "$i" \
+            "$name" \
+            "[$(security_label "$sec")]" \
+            "$signal"
 
         ((i++))
 
@@ -372,13 +331,8 @@ select_network() {
                 if [ "$choice" -ge 1 ] &&
                    [ "$choice" -le "${#NETWORKS[@]}" ]; then
 
-                    # Guardamos la línea completa seleccionada.
-                    SELECTED_NETWORK="${NETWORKS[$((choice-1))]}"
-
-                    # El SSID es la parte anterior a la columna
-                    # de seguridad.
-                    SSID=$(echo "$SELECTED_NETWORK" |
-                        sed -E 's/[[:space:]]+(psk|open|wep|8021x|owe|sae|wpa)[[:space:]].*$//')
+                    IFS=$'\x1f' read -r SSID sec signal \
+                        <<< "${NETWORKS[$((choice-1))]}"
 
                     return 0
                 fi
@@ -391,7 +345,6 @@ select_network() {
 
     done
 }
-
 
 # ----------------------------------------------------------
 # PEDIR CONTRASEÑA
