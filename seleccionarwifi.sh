@@ -158,22 +158,33 @@ scan_networks() {
     mapfile -t NETWORKS < <(
 
         "$IWCTL" station "$DEVICE" get-networks 2>/dev/null |
+        # 1) Quitar códigos de color ANSI (esto es lo que causaba
+        #    el texto gris "pegado" al resto de la línea).
+        sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g' |
+        # 2) Quitar caracteres no imprimibles raros (líneas de
+        #    bordes con caracteres unicode de tabla, etc.)
+        tr -d '\r' |
+        # 3) Quedarnos SOLO con líneas que tengan una columna de
+        #    seguridad real (psk/open/wep/8021x/owe/sae/wpa).
+        #    Así ignoramos automáticamente título, separadores
+        #    de guiones y la fila de encabezado "Network name...",
+        #    sin depender de contar líneas fijas.
         awk '
-        NR > 1 {
-            line=$0
+        {
+            line = $0
 
-            sub(/^[*[:space:]]+/, "", line)
+            # Quita el ">" de la red conectada y espacios/asteriscos iniciales
+            sub(/^[>*[:space:]]+/, "", line)
 
-            if (line != "" &&
-                line !~ /^Network[[:space:]]*$/ &&
-                line !~ /^[-]+$/) {
+            if (line ~ /[[:space:]](psk|open|wep|8021x|owe|sae|wpa)([[:space:]]|$)/) {
 
-                print line
+                sub(/[[:space:]]+(psk|open|wep|8021x|owe|sae|wpa).*$/, "", line)
+                gsub(/[[:space:]]+$/, "", line)
+
+                if (line != "") print line
             }
         }
         ' |
-        sed 's/[[:space:]]\{2,\}.*$//' |
-        sed '/^$/d' |
         sort -u
 
     )
