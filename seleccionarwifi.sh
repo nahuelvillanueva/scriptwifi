@@ -159,44 +159,111 @@ signal_label() {
 
     local raw="$1"
     local trimmed
+
     trimmed=$(echo -n "$raw" | tr -d '[:space:]')
 
-    # iwctl suele representar la señal repitiendo el mismo
-    # carácter (por ejemplo "****" o el carácter de barras que
-    # use tu versión). Si es así, contamos cuántos hay.
-    if [[ -n "$trimmed" ]] && [[ "$trimmed" =~ ^(.)\1*$ ]]; then
+    # ------------------------------------------------------
+    # SEÑAL EN ASTERISCOS
+    # ------------------------------------------------------
+
+    if [[ "$trimmed" =~ ^\*+$ ]]; then
 
         local count=${#trimmed}
 
+        # Limitar a 5
+        [ "$count" -gt 5 ] && count=5
+
+        local filled=""
+        local empty=""
+        local i
+
+        # Asteriscos llenos
+        for ((i=0; i<count; i++)); do
+            filled+="*"
+        done
+
+        # Asteriscos vacíos
+        for ((i=count; i<5; i++)); do
+            empty+="*"
+        done
+
+        local quality
+
         case "$count" in
-            4) echo "Excelente ($raw)" ;;
-            3) echo "Buena ($raw)" ;;
-            2) echo "Regular ($raw)" ;;
-            1) echo "Débil ($raw)" ;;
-            *) echo "$raw" ;;
+            5) quality="Excelente" ;;
+            4) quality="Buena" ;;
+            3) quality="Regular" ;;
+            2) quality="Débil" ;;
+            1) quality="Muy débil" ;;
+            *) quality="Sin señal" ;;
         esac
 
-        return
+        # Blanco = señal recibida
+        # Gris = señal faltante
+        printf "\033[37m%s\033[90m%s\033[0m %s" \
+            "$filled" \
+            "$empty" \
+            "$quality"
+
+        return 0
     fi
 
-    # Si viene como dBm (ej: "-45 dBm")
-    if [[ "$raw" =~ ^-?[0-9]+[[:space:]]*dBm$ ]]; then
+    # ------------------------------------------------------
+    # SEÑAL EN dBm
+    # ------------------------------------------------------
+
+    if [[ "$raw" =~ -?[0-9]+[[:space:]]*dBm ]]; then
 
         local dbm
         dbm=$(echo "$raw" | grep -oE -- '-?[0-9]+')
 
-        if   [ "$dbm" -ge -50 ]; then echo "Excelente ($raw)"
-        elif [ "$dbm" -ge -60 ]; then echo "Buena ($raw)"
-        elif [ "$dbm" -ge -70 ]; then echo "Regular ($raw)"
-        else echo "Débil ($raw)"
+        local count
+
+        if [ "$dbm" -ge -50 ]; then
+            count=5
+        elif [ "$dbm" -ge -60 ]; then
+            count=4
+        elif [ "$dbm" -ge -70 ]; then
+            count=3
+        elif [ "$dbm" -ge -80 ]; then
+            count=2
+        else
+            count=1
         fi
 
-        return
+        local filled=""
+        local empty=""
+        local i
+
+        for ((i=0; i<count; i++)); do
+            filled+="*"
+        done
+
+        for ((i=count; i<5; i++)); do
+            empty+="*"
+        done
+
+        local quality
+
+        case "$count" in
+            5) quality="Excelente" ;;
+            4) quality="Buena" ;;
+            3) quality="Regular" ;;
+            2) quality="Débil" ;;
+            1) quality="Muy débil" ;;
+        esac
+
+        printf "\033[37m%s\033[90m%s\033[0m %s" \
+            "$filled" \
+            "$empty" \
+            "$quality"
+
+        return 0
     fi
 
-    # Formato desconocido: mostramos lo que haya, tal cual
     echo "$raw"
 }
+
 
 # ----------------------------------------------------------
 # ESCANEAR REDES
@@ -289,7 +356,7 @@ select_network() {
 
         IFS=$'\x1f' read -r name sec signal <<< "$network"
 
-        printf "  %2d) %-28s %-16s Señal: %s\n" \
+        printf "  %2d) %-28s %-16s Señal: %b\n" \
             "$i" \
             "$name" \
             "[$(security_label "$sec")]" \
