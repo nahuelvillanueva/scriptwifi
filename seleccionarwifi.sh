@@ -207,34 +207,33 @@ connect_wifi() {
     echo
     echo -e "${YELLOW}Conectando a '$SSID'...${NC}"
 
-    # Se envía la contraseña a iwctl mediante stdin.
     RESULT=$(
-        printf '%s\n' "$PASSWORD" |
-        "$IWCTL" --passphrase /dev/stdin station "$DEVICE" connect "$SSID" \
+        "$IWCTL" station "$DEVICE" connect "$SSID" <<EOF
+$PASSWORD
+EOF
         2>&1
     )
 
     STATUS=$?
 
-    unset PASSWORD
-
     if [ "$STATUS" -eq 0 ]; then
-
         echo
-        echo -e "${GREEN}Conectado correctamente a '$SSID'.${NC}"
+        echo -e "${GREEN}✓ Conectado correctamente a '$SSID'.${NC}"
         echo -e "${GREEN}Dispositivo: $DEVICE${NC}"
         echo
-
+        unset PASSWORD
         return 0
     fi
 
     echo
-    echo -e "${RED}No se pudo conectar a '$SSID'.${NC}"
+    echo -e "${RED}✗ No se pudo conectar a '$SSID'.${NC}"
     echo "$RESULT"
     echo
 
+    unset PASSWORD
     return 1
 }
+
 
 # ==========================================================
 # PROGRAMA PRINCIPAL
