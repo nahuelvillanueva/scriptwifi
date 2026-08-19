@@ -310,83 +310,40 @@ escape_iwd() {
 
 connect_wifi() {
 
-    local PROFILE_DIR="/var/lib/iwd"
-    local PROFILE="$PROFILE_DIR/$SSID.psk"
-
     echo
     echo -e "${YELLOW}Conectando a:${NC} $SSID"
     echo -e "${YELLOW}Dispositivo:${NC} $DEVICE"
     echo
 
-    # Necesitamos permisos para escribir en /var/lib/iwd
-    if [ ! -w "$PROFILE_DIR" ]; then
-
-        echo -e "${RED}No hay permisos para escribir en $PROFILE_DIR.${NC}"
-        echo
-        echo "Ejecutá el script con:"
-        echo
-        echo "sudo $0"
-        echo
-
-        return 1
-    fi
-
-    # Escapar valores
-    local SAFE_SSID
-    local SAFE_PASSWORD
-
-    SAFE_SSID=$(escape_iwd "$SSID")
-    SAFE_PASSWORD=$(escape_iwd "$PASSWORD")
-
-    # Crear perfil de iwd
-    cat > "$PROFILE" <<EOF
-[Security]
-Passphrase=$SAFE_PASSWORD
-EOF
-
-    chmod 600 "$PROFILE"
-
     echo -e "${YELLOW}Intentando conexión...${NC}"
 
-    # Conectar mediante iwctl
     RESULT=$(
-        "$IWCTL" station "$DEVICE" connect "$SSID" 2>&1
+        "$IWCTL" --passphrase "$PASSWORD" \
+            station "$DEVICE" connect "$SSID" 2>&1
     )
 
     STATUS=$?
 
-    # Esperar un momento para comprobar estado
-    sleep 3
+    # La contraseña ya no hace falta
+    unset PASSWORD
 
-    # Comprobar conexión
-    STATE=$(
-        "$IWCTL" station "$DEVICE" show 2>/dev/null |
-        grep -i "State" |
-        head -n 1
-    )
-
-    if echo "$STATE" | grep -qi "connected"; then
+    if [ "$STATUS" -eq 0 ]; then
 
         echo
         echo -e "${GREEN}==========================================${NC}"
-        echo -e "${GREEN}          CONECTADO CORRECTAMENTE${NC}"
+        echo -e "${GREEN}       CONECTADO CORRECTAMENTE${NC}"
         echo -e "${GREEN}==========================================${NC}"
         echo
-        echo -e "${GREEN}Red:${NC}        $SSID"
+        echo -e "${GREEN}Red:${NC}         $SSID"
         echo -e "${GREEN}Dispositivo:${NC} $DEVICE"
         echo
-        echo -e "${GREEN}Perfil guardado en iwd.${NC}"
-        echo
-
-        unset PASSWORD
 
         return 0
-
     fi
 
     echo
     echo -e "${RED}==========================================${NC}"
-    echo -e "${RED}             NO SE CONECTÓ${NC}"
+    echo -e "${RED}          NO SE PUDO CONECTAR${NC}"
     echo -e "${RED}==========================================${NC}"
     echo
 
@@ -394,8 +351,6 @@ EOF
         echo "$RESULT"
         echo
     fi
-
-    unset PASSWORD
 
     return 1
 }
