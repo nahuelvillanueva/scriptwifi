@@ -324,7 +324,6 @@ connect_wifi() {
 
     STATUS=$?
 
-    # La contraseña ya no hace falta
     unset PASSWORD
 
     if [ "$STATUS" -eq 0 ]; then
@@ -347,13 +346,12 @@ connect_wifi() {
     echo -e "${RED}==========================================${NC}"
     echo
 
-    if [ -n "$RESULT" ]; then
-        echo "$RESULT"
-        echo
-    fi
+    echo "$RESULT"
+    echo
 
     return 1
 }
+
 
 # ==========================================================
 # PROGRAMA PRINCIPAL
