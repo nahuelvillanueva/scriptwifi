@@ -45,19 +45,15 @@ fi
 # ----------------------------------------------------------
 
 get_interfaces() {
-
-    local dev
-
-    for dev in /sys/class/net/*; do
-
-        dev="${dev##*/}"
-
-        if [ -d "/sys/class/net/$dev/wireless" ]; then
-            echo "$dev"
-        fi
-
-    done
+    "$IWCTL" station list 2>/dev/null |
+        awk '
+        NR > 2 && $1 != "" && $1 !~ /^-+$/ {
+            print $1
+        }
+        ' |
+        grep -E '^(wlan|wlp|wlx|tplink|wifi)'
 }
+
 
 # ----------------------------------------------------------
 # SELECCIONAR DISPOSITIVO
